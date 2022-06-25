@@ -1,7 +1,11 @@
 ## Getting the Best Bang For Your Buck: Choosing What to Evaluate for Faster Bayesian Optimization (AutoML Conf 2022)
 In this work, we proposed a decoupled cost-aware acquisition function for Bayesian multi-objective optimization. Instead of evaluating all objective functions, we automatically choose the one that provides the highest benefit, weighted by the cost to perform the evaluation. Our method is especially useful for DNNs used in resource-constrained IoT applications and edge devices. Furthermore, when confronted with a performance bottleneck, this method can be useful in returning the system to a good operating region significantly faster than other baselines. Additionally, our method enriches the existing multi-objective Bayesian optimization (MOBO) literature with a novel decoupled cost-aware technique. 
 
+## Cost Aware Decoupled MOBO Approach
+![automl_repo](https://user-images.githubusercontent.com/12802456/175791546-5510a33e-0889-4f65-8534-6b72c35a18c5.png)
+
 ## Abstract
+
 Machine learning system design frequently necessitates balancing multiple objectives, such
 as prediction error and energy consumption for deep neural networks (DNNs). Typically,
 no single design performs well across all objectives; thus, finding Pareto-optimal designs
