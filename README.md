@@ -62,7 +62,7 @@ TBA
 ```
 
 ## Contacts
-Please please feel free to contact via email if you find any issues or have any feedbacks. Thank you for using Unicorn.
+Please please feel free to contact via email if you find any issues or have any feedbacks. Thank you for usinh our approach.
 |Name|Email|     
 |---------------|------------------|      
 |Md Shahriar Iqbal|miqbal@email.sc.edu|          
