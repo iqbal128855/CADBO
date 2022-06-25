@@ -25,7 +25,7 @@ class FlexiBO(object):
     m1: objective 1
     m2: objective 2
     """
-    def __init__(self, data, surrogate):
+    def __init__(self, surrogate):
         print ("Initializing FlexiBO class")
     
         self.df= data

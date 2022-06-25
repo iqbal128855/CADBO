@@ -1,192 +1,235 @@
-"""-----------------------------------------------------------------------------
-@Name: Flexible Bayesian Optimization (FlexiBO): An active learning for optimiz-
-ing  multiple objectives of different cost
-@Version: 0.1
-@Author: Shahriar Iqbal
---------------------------------------------------------------------------------
 """
-import os 
+@Name: FlexiBO
+@Version: 0.1
+@Author: Shahriar Iqbal"""
+
+from __future__ import division
+import os
 import math
 import yaml
+import random
+import pygmo as pg
 import numpy as np
+from operator import itemgetter, attrgetter
+from copy import deepcopy
+import time
+from numpy.random import seed
 from src.utils import Utils
 from src.sampling import Sampling
-from src.config_space import ConfigSpaceReal
-from src.config_hardware import ConfigHardware
-from src.config_network import ConfigNetwork
-from src.compute_performance import ComputePerformance 
- 
+from src.config_space import ConfigSpaceSynthetic
+from src.objective_synthetic import ObjectiveSynthetic
+
 class FlexiBO(object):
     """This class is used to implement an active learning approach to optimize
-    multiple objectives of different cost
-    E: design space
-    O: evaluated objectives
-    n: number of objectives
-    m1: objective 1
-    m2: objective 2
-    """
-    def __init__(self, data, surrogate):
-        print ("Initializing FlexiBO class")
-    
-        self.df= data
-        with open("config.yaml","r") as fp:
-            config= yaml.load(fp)
-        cfg=ConfigSpaceReal("hardware","os",config["config"]["network"]["net"])
-        (self.E, 
-        self.O, 
-        self.measurement)=cfg.set_design_space()
-        self.network=config["config"]["network"]["net"]
-        self.NUM_ITER=200
-        self.NUM_OBJ=2
-        self.O1_IND=config["config"]["index"]["O1"]
-        self.O2_IND=config["config"]["index"]["O2"]
-        self.m1= config["config"]["objective"]["O1"]
-        self.m2= config["config"]["objective"]["O2"]
-        self.O1_COST= config["config"]["evaluation_cost"]["O1"]
-        self.O2_COST= config["config"]["evaluation_cost"]["O2"]    
-        self.sampling= Sampling(self.O1_IND, self.O2_IND, self.O1_COST,
-                                self.O2_COST)
-        self.utils= Utils(self.O1_IND, self.O2_IND)
-        self.surrogate=surrogate
-        if self.surrogate=="GP":
+    multiple objectives of different cost.
+        X: design space
+        F: evaluated objectives
+        M: measured objectives values
+        n: number of objectives"""
+
+    def __init__(self, surrogate):
+        print ("[STATUS]: Initializing FlexiBO class")
+        self.NUM_ITER = 30
+        self.NUM_OBJ = 2
+        # synthetic Function
+        self.N_VAR = 2
+        self.cfg = ConfigSpaceSynthetic(self.N_VAR)
+        (self.X, self.F, self.M) = self.cfg.set_design_space()
+        self.OS = ObjectiveSynthetic()
+        self.sampling = Sampling()
+        self.utils = Utils()
+        self.surrogate = surrogate
+        if self.surrogate == "GP":
              from src.surrogate_model import GPSurrogateModel
-             self.SM=GPSurrogateModel()
+             self.SM = GPSurrogateModel()
         else:
             print ("[ERROR]: Surrogate model not supported")
-        (self.X, self.Y1, self.Y2)=self.prepare_training_data()
-        
+
         self.perform_bo_loop()
-          
-    def prepare_training_data(self):
-        """This function is used to prepare training data
-        """
+
+    def initialize(self, X):
+        """This function is used to initialize data"""
+        random.seed(88)
+        index = random.sample(range(0, len(X) - 1), 20)
+        X = [X[i] for i in index]
+        f1, f2 = [], []
+        for i in range (len(X)):
+           cur_f1, cur_f2 = self.OS.ZDT1(self.X[i], self.N_VAR)
+           f1.append([cur_f1])
+           f2.append([cur_f2])
+
+        return (X, f1, f2,
+               index)
     
-        X=self.df[["num_cores", "core_freq", "gpu_freq",
-                   "emc_freq", "cache_pressure", "swappiness",
-                   "dirty_bg","dirty_ratio","entry_num_filters",
-                   "entry_filter_size","middle_num_filters","middle_filter_size",
-                   "exit_filter_size"]].values
+    def determine_pareto_front(self, candidate_F):
+        """This function is used to construct Pareto fronts"""
+        sampled_points_indices = [i for i in range(0, len(candidate_F))]
         
-        Y1=self.df[self.m1].values
-        Y2=self.df[self.m2].values
-        Y1=[[i] for i in Y1]
-        Y2=[[i] for i in Y2]
-        
-        return (X, Y1, Y2)
-    
-    def initialize(self):
-        """This function is used to initialize data
-        """
-        import random
-        index=random.sample(range(0,len(self.X)-1),20)
-        X=[self.X[i] for i in index]
-        Y1=[self.Y1[i] for i in index]
-        Y2=[self.Y2[i] for i in index]
-        return (X, Y1, Y2,
-                index)
-                           
+        for i in sampled_points_indices:
+            # If the current config is not dominated
+            if i!= -1:
+                cur = candidate_F[i]
+                for j in sampled_points_indices :
+                    # Check only sampledinated points other than current
+                    if (j!= -1 and j!=i):
+                       # Check if current config is dominated
+                       if (candidate_F[j][0] >= cur[0] and
+                           candidate_F[j][1] >= cur[1]):
+                          # Append the current config to dominated
+                          sampled_points_indices[i]= -1
+                       # Check if current config dominates
+                       if (candidate_F[j][0] < cur[0] and
+                           candidate_F[j][1] < cur[1]):
+                          # Append the config that is dominated by current to dominated
+                          sampled_points_indices[j] = -1
+
+        sampled_points_indices = [i for i in sampled_points_indices if i not in (-1,-1)]
+        sampled_F = [candidate_F[i] for i in sampled_points_indices]
+   
+        return sampled_F
+
+    def get_optimal_F(self, R_t):
+        """This function is used to get the optimal Pareto front using the evaluated designs"""
+        candidate_F_samples = []
+        for i in range(len(self.F)):
+            cur = self.F[i]
+            if cur["f1"] is True and cur["f2"] is True:
+                candidate_F_samples.append([self.M[i]["f1"], self.M[i]["f2"]])
+            elif cur["f1"] is True and cur["f2"] is False:
+                candidate_F_samples.append([self.M[i]["f1"],R_t[i]["avg"][1]])
+            elif cur["f1"] is False and cur["f2"] is True:
+                candidate_F_samples.append([R_t[i]["avg"][0], self.M[i]["f2"]])          
+            else: 
+                pass                
+        F_optimal_samples = self.determine_pareto_front(candidate_F_samples)
+        return F_optimal_samples
+         
     def perform_bo_loop(self):
         """This function is used to perform bayesian optimization loop
-        U: Design Space
-        REGION: Uncertainty Region for each configuration in design space
+            U: non dominated points
+            R_t: Uncertainty region for each point in the design space
+            t: Iteration
+            x: A design
+            f1: Objective 1
+            f2: Objective 2
         """
-        # Initialization
-        BETA=1.0
-        (init_X, init_Y1, init_Y2, init_measured_indices)=self.initialize()
+        # initialization
+        pi = 3.1416
+        delta = 0.1
+        BETA = lambda t : 1/9*((2 * np.log(self.NUM_OBJ * len(self.X)*pi**2*t**2))/6*delta)
+        (init_X, init_f1, init_f2,
+        evaluated_indices) = self.initialize(self.X)
         
-        for i in range(0,len(init_measured_indices)):
-            self.O[i]["o1"]=True
-            self.measurement[init_measured_indices[i]]["o1"]=init_Y1[i][0]
-            self.O[i]["o2"]=True
-            self.measurement[init_measured_indices[i]]["o2"]=init_Y2[i][0]    
-        (init_X, init_Y1, init_Y2)=(np.array(init_X), np.array(init_Y1), np.array(init_Y2))
+        for i in range(len(evaluated_indices)):
+            self.F[evaluated_indices[i]]["f1"], self.F[evaluated_indices[i]]["f2"] = True, True
+            self.M[evaluated_indices[i]]["f1"], self.M[evaluated_indices[i]]["f2"] = init_f1[i][0], init_f2[i][0]
         
-        U=np.array(self.E[:])
-        init_X1=init_X[:]
-        init_X2=init_X[:]
+        U = self.X[:]
+        init_X1 = init_X[:]
+        init_X2 = init_X[:]
         
-        # bo loop
-        for iteration in range(0,self.NUM_ITER):
-            print ("---------------------------------------Iteration: ",iteration)
-            REGION=[{} for _ in U]
-            if self.surrogate=="GP":
-                # Fit a GP for each objective
-                gpr1, gpr2= self.SM.fit_gp()
-                model_o1=gpr1.fit(init_X1,init_Y1)
-                model_o2=gpr2.fit(init_X2,init_Y2)
-            
-            for config in range(0,len(U)):
-                # Compute mu and sigma of each points for each objective 
-                cur=np.array([U[config]])
-                cur_eval=self.O[config]
+        # Initialize R
+        R_t={}
+        for i in range(len(U)):
+            R_t[i] = {}
+        
+        # Bo loop
+        for t in range(1, self.NUM_ITER):
+            print ("----------Iteration----------: ", t)
+            if self.surrogate == "GP":
+                # fit a GP for each objective
+                gpr1, gpr2 = self.SM.fit_gp()
+                f1_model = gpr1.fit(init_X1, init_f1)
+                f2_model = gpr2.fit(init_X2, init_f2)
+            for x in range(0, len(U)):
+                # Compute mu and sigma of each points for each objective
+                cur = np.array([U[x]])
+                cur_eval = self.F[x]
                 # Objective 1
-                if cur_eval["o1"] is False:
-                    if self.surrogate=="GP":
-                        mu_o1, sigma_o1= model_o1.predict(cur,return_std=True)
-                    
+                if cur_eval["f1"] is False:
+                    if self.surrogate == "GP":
+                        mu1, sigma1 = f1_model.predict(cur, return_std=True,)
+                        
+                        mu1, sigma1 = mu1[0][0],sigma1[0]
+
                 else:
-                    (mu_o1,sigma_o1)=(self.measurement[config]["o1"],0)
-                 
+                    mu1, sigma1 = self.M[x]["f1"], 0
+
                 # Objective 2
-                if cur_eval["o2"] is False:
-                    if self.surrogate=="GP":                  
-                        mu_o2, sigma_o2= model_o2.predict(cur,return_std=True)
+                if cur_eval["f2"] is False:
+                    if self.surrogate == "GP":
+                        mu2, sigma2 = f2_model.predict(cur, return_std=True)
+                        
+                        mu2, sigma2 = mu2[0][0],sigma2[0]
+                  
                 else:
-                    (mu_o2,sigma_o2)=(self.measurement[config]["o2"],0)
+                    (mu2, sigma2)=(self.M[x]["f2"], 0)
                 
-                # Compute uncertainty region for each point using mu and sigma                
-                REGION[config]["pes"]=[
-                0 if (mu_o1-math.sqrt(BETA)*sigma_o1)<0 else mu_o1-math.sqrt(BETA)*sigma_o1,
-                0 if (mu_o2-math.sqrt(BETA)*sigma_o2)<0 else mu_o2-math.sqrt(BETA)*sigma_o2
-                ]
-                REGION[config]["avg"]=[mu_o1,mu_o2]
-                REGION[config]["opt"]=[mu_o1+math.sqrt(BETA)*sigma_o1, mu_o2+math.sqrt(BETA)*sigma_o2]
+                # Compute uncertainty region for each point using mu and sigma
+                pess_f1 = mu1 - math.sqrt(BETA(t)) * sigma1
+                pess_f2 = mu2 - math.sqrt(BETA(t)) * sigma2
+
+                R_t[x]["pes"]=[pess_f1, pess_f2]
+                R_t[x]["avg"]=[mu1, mu2]
+                R_t[x]["opt"]=[mu1 + math.sqrt(BETA(t)) * sigma1, mu2 + math.sqrt(BETA(t)) * sigma2]
             
-           
-            # Determine undominated points
-            (undominated_points_ind,
-            undominated_points)=self.utils.identify_undominated_points(REGION)
+            # R_t = {0:{'opt': [4, 1], 'avg': [2, 1], 'pes': [0, 1]},
+            #        1:{'opt': [3, 7], 'avg': [2, 6], 'pes': [1, 5]},
+            #        2:{'opt': [5, 4], 'avg': [3.5, 3.5], 'pes': [2, 3]},
+            #        3:{'opt': [9, 2], 'avg': [6.5, 2], 'pes': [4, 2]},
+            #        4:{'opt': [8, 3], 'avg': [8, 2], 'pes': [8, 1]},
+            #        5:{'opt': [12, 2], 'avg': [11, 1.5], 'pes': [10, 1]},
+            #        6:{'opt': [10, 6], 'avg': [9, 5], 'pes': [8, 4]}}
+            # Determine non-dominated points
+            nondom_points_ind = self.utils.identify_nondom_points(R_t)
+            
             # Determine pessimistic pareto front
-            (pess_pareto,
-            pess_indices_map)=self.utils.construct_pessimistic_pareto_front(
-                                undominated_points_ind, undominated_points, "CONSTRUCT")
+            (F_pess, F_pess_indices) = self.utils.construct_pessimistic_pareto_front("CONSTRUCT", nondom_points_ind, R_t)
+
+
             # Determine optimistic pareto front
-            (opt_pareto,
-            opt_indices_map)=self.utils.construct_optimistic_pareto_front(
-                                undominated_points_ind, undominated_points, "CONSTRUCT")
+            (F_opt, F_opt_indices) = self.utils.construct_optimistic_pareto_front("CONSTRUCT", nondom_points_ind, R_t)
+
             # Determine pessimistic pareto volume
-            pess_pareto_volume=self.utils.compute_pareto_volume(pess_pareto)
+            V_F_pess = self.utils.compute_pareto_volume(F_pess)
+
             # Determine optimistic pareto volume
-            opt_pareto_volume=self.utils.compute_pareto_volume(opt_pareto)
+            V_F_opt = self.utils.compute_pareto_volume(F_opt)
+
             # Determine volume of the pareto front
-            volume_of_pareto_front=opt_pareto_volume-pess_pareto_volume
-            # Determine next configuration and objective
-            (next_sample_index, 
-            next_sample, 
-            objective)=self.sampling.determine_next_sample(pess_pareto, opt_pareto, pess_indices_map,
-                                                         opt_indices_map, pess_pareto_volume, opt_pareto_volume,
-                                                         REGION, self.E)
-            
+            V_P_R = V_F_opt - V_F_pess
+            print (V_P_R)
+            # determine next configuration and objective
+            (next_sample_index, next_sample, objective) = self.sampling.determine_next_sample(
+                                                          F_pess, F_opt, F_pess_indices,
+                                                          F_opt_indices, V_F_pess, V_F_opt,
+                                                          R_t, self.X, self.F)
+
+            print("next_index",next_sample_index)
+            print ("next objective",objective)
             # Perform measurement on next sample on the objective returned
-            # Update init_X and init_Y
+            # Update init_X and init_f
+            if objective == "f1":
+                # Evaluate Objective f1
+                cur_X1 = np.array(next_sample)
+                self.F[next_sample_index]["f1"] = True
+                cur_f1 = [self.OS.ZDT1(cur_X1, len(cur_X1))[0]]
+                self.M[next_sample_index]["f1"] = cur_f1[0]
+                np.vstack((init_X1, cur_X1))
+                np.vstack((init_f1, cur_f1))
+            elif objective == "f2":
+                cur_X2 = np.array(next_sample)
+                self.F[next_sample_index]["f2"] = True
+                cur_f2 = [self.OS.ZDT1(cur_X2, len(cur_X2))[1]]
              
-            if objective=="o1":
-                # Evaluate Objective O1
-                ConfigHardware(next_sample)
-                ComputePerformance()
-                cur_X1=np.array(next_sample)                              
-                self.O[next_sample_index]["o1"]=True
-                self.measurement[next_sample_index]["o1"]=cur_Y1[0]
-                np.vstack((init_X1,cur_X1))
-                np.vstack((init_Y1,cur_Y1))
-            if objective=="o2":
-                cur_X2=np.array(next_sample)
-                ConfigNetwork(self.network, next_sample)
-                ComputePerformance()
-                self.O[next_sample_index]["o2"]=True
-                self.measurement[next_sample_index]["o2"]=cur_Y2[0]
-                np.vstack((init_X2,np.array(next_sample)))
-                np.vstack((init_Y2,cur_Y2))
+                self.M[next_sample_index]["f2"] = cur_f2[0]
+                np.vstack((init_X2, cur_X2))
+                np.vstack((init_f2, cur_f2))
+            else:
+                print ("[ERROR]: invalid objective")
             
+            # Determine the Pareto Front
+            F_optimal = self.get_optimal_F(R_t)
+            print ("Current Pareto Front")
+            print (F_optimal)
             
-                   

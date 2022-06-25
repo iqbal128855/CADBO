@@ -1,190 +1,124 @@
-"""-----------------------------------------------------------------------------
-@Name: Flexible Bayesian Optimization (FlexiBO): An active learning for optimiz-
-ing  multiple objectives of different cost
+"""
+@Name: FlexiBO
 @Version: 0.1
 @Author: Shahriar Iqbal
---------------------------------------------------------------------------------
 """
 import itertools
 import numpy as np
+import pygmo as pg
 from operator import itemgetter
 
 class Utils(object):
-    def __init__(self, o1_ind, o2_ind):
-        print ("[STATUS]: Initializing Utils Class")
-        self.O1_IND=o1_ind
-        self.O2_IND=o2_ind
-        
-    def compute_pareto_volume(self,
-                              front):
-        """@COMPUTE_PARETO_VOLUME
-        ------------------------------------------------------------------------
-        This function is used to compute pareto volume between pessimistic and
-        optimistic pareto front
-        ------------------------------------------------------------------------
-        """
-        prev_x=0
-        prev_y=0
-        area=0
-        for point in front:
-            a=point[self.O1_IND]-prev_x
-            b=point[self.O2_IND]-prev_y
-            area+=a*b
-            prev_x=point[self.O1_IND]
-        
-        return area
-    
-    def construct_pessimistic_pareto_front(self,
-                               pareto_points_ind,
-                               pareto_points,
-                               mode):
-        """@CONSTRUCT_PESSIMISTIC_PARETO_FRONT
-        ------------------------------------------------------------------------
-        This function is used to construct pessimistic pareto front using the
-        undominated points
-        ------------------------------------------------------------------------
-        """
-        if mode=="CONSTRUCT":
-            pess_pareto=list()
-            indices_map={}       
-            for point in range(0,len(pareto_points)):
-                indices_map[point]=pareto_points_ind[point]
-                pess_pareto.append(pareto_points[point]["pes"])
-        if mode=="UPDATE":
-            pess_pareto=pareto_points[:]          
-        # sort along object1 in descending order
-        sorted_pess_ind=sorted(range(len(pess_pareto)), key=lambda k: pess_pareto[k][self.O1_IND])[::-1]
-               
-        #-----------------------------------------------------------------------
-        # Pessimistic Pareto Front Computation
-        #-----------------------------------------------------------------------
-        
-        pess_o2=[pess_pareto[i][self.O2_IND] for i in sorted_pess_ind]
-        i=0
-        max_val=[]
-        orig=[]
-        sampled_pess_pareto_ind=[]
-        while i<len(pess_o2): 
-            cur=pess_o2[i]
-            sampled_pess_pareto_ind.append(i)
-            orig.append(i)
-    
-            for j in range(i+1,len(pess_o2)):
-                if cur>=pess_o2[j]:
-                    sampled_pess_pareto_ind.append(i)
-                    max_val.append(j)
-                    orig.append(j)
-            if len(max_val)!=0:
-               i=np.max(max_val)+1
-               max_val=[]
-            else:
-               i=i+1
-        sampled_pess_pareto=[[pess_o2[sampled_pess_pareto_ind[i]],pess_pareto[i][self.O1_IND]]for i in range(0,len(orig))]
-        if mode=="CONSTRUCT":
-            return (sampled_pess_pareto, 
-                    indices_map)
-        if mode=="UPDATE":
-            return sampled_pess_pareto
-    
-    def construct_optimistic_pareto_front(self,
-                                          pareto_points_ind,
-                                          pareto_points,
-                                          mode):
-        """@CONSTRUCT_OPTIMISTIC_PARETO_FRONT
-        ------------------------------------------------------------------------
-        This function is used to construct optimistic pareto front using the 
-        undominated points
-        ------------------------------------------------------------------------
-        """
-        if mode=="CONSTRUCT":                                   
-            opt_pareto=list()
-            indices_map={}       
-            for point in range(0,len(pareto_points)):
-                indices_map[point]=pareto_points_ind[point]
-                opt_pareto.append(pareto_points[point]["opt"])
-        if mode=="UPDATE":
-            opt_pareto=pareto_points[:]
-        # sort along object1 in descending order
-        sorted_opt_ind=sorted(range(len(opt_pareto)), key=lambda k: opt_pareto[k][self.O1_IND])[::-1]
-        #-----------------------------------------------------------------------
-        # Optimistic Pareto Front Computation
-        #-----------------------------------------------------------------------
-        # sample optimistic pareto points
-        cur=opt_pareto[sorted_opt_ind[0]]
-        # initialize 
-        sampled_opt_pareto_ind=[sorted_opt_ind[0]]
-        sampled_opt_pareto=[cur]
-        for ind in range(1,len(sorted_opt_ind)):
-            next=opt_pareto[sorted_opt_ind[ind]]
-            if next[self.O2_IND]>=cur[self.O2_IND]:
-                sampled_opt_pareto_ind.append(sorted_opt_ind[ind])
-                sampled_opt_pareto.append(next)
-            cur= opt_pareto[sorted_opt_ind[ind]]
-        
-        if mode=="CONSTRUCT":
-            return (sampled_opt_pareto,
-                    indices_map)
-        if mode=="UPDATE":
-            return sampled_opt_pareto
-                             
-    def identify_undominated_points(self,
-                             region):
-        """@IDENTIFY_UNDOMINATED_POINTS
-        ------------------------------------------------------------------------
-        This function is used to determine the dominated points that will be
-        included in the pessimistic and optimistic pareto front.
-        ------------------------------------------------------------------------
-        """
-        
-        dominated_points_ind=list()
-        pes_pareto,opt_pareto=list(),list()
-        undominated_points_ind=[i for i in range(0,len(region))]
-        
-        for undom_i in undominated_points_ind:
-            # if the current config is not dominated 
-            if undom_i!= -1:
-                cur= region[undom_i]
-                for undom_j in undominated_points_ind :
-                    # check only undominated configs other than current
-                    if (undom_j!= undom_i or undom_j!=-1):
-                        
-                       # check if current config is dominated   
-                       if (region[undom_j]["pes"][self.O1_IND] >= cur["opt"][self.O1_IND] and
-                          region[undom_j]["pes"][self.O2_IND] >= cur["opt"][self.O2_IND]):
-                          # append the current config to dominated
-                          dominated_points_ind.append(undom_i)
-                          undominated_points_ind[undom_i]=-1
-          
-                       # check if current config dominates
-                       if (region[undom_j]["opt"][self.O1_IND] < cur["pes"][self.O1_IND] and
-                          region[undom_j]["opt"][self.O2_IND] < cur["pes"][self.O2_IND]):
-                          # append the config that is dominated by current to dominated 
-                          dominated_points_ind.append(undom_j)
-                          undominated_points_ind[undom_j]=-1
-        
-        # TODO: Dominated points indices multiple occurence issue                 
-        undominated_points_ind=[i for i in undominated_points_ind if i not in (-1,-1)]
-        undominated_points=[region[i] for i in undominated_points_ind]
-        
-        return (undominated_points_ind, 
-                undominated_points)
-           
-    def compute_improvement_per_cost(self):
-        """@COMPUTE_IMPROVEMENT_PER_COST
-        ------------------------------------------------------------------------
-        This function is used to compute improvement per cost
-        ------------------------------------------------------------------------
-        """
-        print ("Improvement/Cost")
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
-        
+    def __init__(self):
+        print ("[STATUS]: initializing utils Class")
 
+    def compute_pareto_volume(self, front):
+        """This function is used to compute pareto volume between pessimistic and
+        optimistic pareto front"""
+        prev_x = 0
+        prev_y = 0
+        area = 0
+
+        for point in front:
+            a = point[0] - prev_x
+            b = point[1] - prev_y
+            area += a*b
+            prev_y = point[1]
+
+        return area
+
+    def determine_pareto_front(self, F):
+        """This function is used to construct Pareto fronts"""
+        # Sort along an objective in descending order
+        sorted_F_indices = sorted(range(len(F)), key=lambda k: F[k][0])[::-1]
+        # Sample pessimistic pareto points
+        cur = F[sorted_F_indices[0]]
+        # Initialize
+        sampled_F_indices = [sorted_F_indices[0]]
+        sampled_F = [cur]
+        for i in range(1, len(sorted_F_indices)):
+            next = F[sorted_F_indices[i]]
+            if next[1] >= cur[1]:
+                sampled_F_indices.append(sorted_F_indices[i])
+                sampled_F.append(next)
+            cur = F[sorted_F_indices[i]]
+        
+        return sampled_F, sampled_F_indices
+
+    def construct_pessimistic_pareto_front(self, mode, *args):
+        """This function is used to construct pessimistic pareto front using the
+        undominated points"""
+
+        if mode == "CONSTRUCT":
+            F_pess = list()
+            pareto_points_indices, R = args[0], args[1]
+            indices_map = {}
+            for i in range(0, len(pareto_points_indices)):
+                indices_map[i] = pareto_points_indices[i]
+                F_pess.append(R[pareto_points_indices[i]]["pes"])
+            sampled_F_pess, sampled_F_pess_indices = self.determine_pareto_front(F_pess)
+            # Indices of the F_pess points on R
+            sampled_F_pess_indices = [indices_map[i] for i in sampled_F_pess_indices]
+            return (sampled_F_pess, sampled_F_pess_indices)
+        elif mode == "UPDATE":
+            F_pess = args[0]
+            sampled_F_pess, _ = self.determine_pareto_front(F_pess)
+            return sampled_F_pess
+        else:
+            print ("[ERROR]: Invalid mode")
+            return
+
+    def construct_optimistic_pareto_front(self, mode, *args):
+        """This function is used to construct optimistic pareto front using the
+        undominated points"""
+
+        if mode == "CONSTRUCT":
+            F_opt = list()
+            pareto_points_indices, R = args[0], args[1]
+            indices_map = {}
+            for i in range(0, len(pareto_points_indices)):
+                indices_map[i] = pareto_points_indices[i]
+                F_opt.append(R[pareto_points_indices[i]]["opt"])
+            sampled_F_opt, sampled_F_opt_indices = self.determine_pareto_front(F_opt)
+            # Indices of the F_opt points on R
+            sampled_F_opt_indices = [indices_map[i] for i in sampled_F_opt_indices]
+            return (sampled_F_opt, sampled_F_opt_indices)
+        elif mode == "UPDATE":
+            F_opt = args[0]
+            sampled_F_opt, _ = self.determine_pareto_front(F_opt)
+            return sampled_F_opt
+        else:
+            print ("[ERROR]: Invalid mode")
+            return
+
+    def identify_nondom_points(self, R):
+        """This function is used to determine the dominated points that will be
+        included in the pessimistic and optimistic pareto front."""
+
+        pes_pareto, opt_pareto = [],[]
+        nondom_points_indices = [i for i in range(0, len(R))]
+
+        for i in nondom_points_indices:
+            # If the current config is not dominated
+            if i!= -1:
+                cur = R[i]
+
+                for j in nondom_points_indices :
+                    # Check only nondominated points other than current
+                    if (j!= -1 and j!=i):
+
+                       # Check if current config is dominated
+                       if (R[j]["pes"][0] >= cur["opt"][0] and
+                           R[j]["pes"][1] >= cur["opt"][1]):
+                          # Append the current config to dominated
+                          nondom_points_indices[i]= -1
+
+                       # Check if current config dominates
+                       if (R[j]["opt"][0] < cur["pes"][0] and
+                           R[j]["opt"][1] < cur["pes"][1]):
+                          # Append the config that is dominated by current to dominated
+                          nondom_points_indices[j] = -1
+
+        nondom_points_indices = [i for i in nondom_points_indices if i not in (-1,-1)]
+
+        return nondom_points_indices
