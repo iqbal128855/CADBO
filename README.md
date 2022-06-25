@@ -1,4 +1,4 @@
-## Getting the Best Bang For Your Buck: Choosing What to Evaluate for Faster Bayesian Optimization (AutpML 2022)
+## Getting the Best Bang For Your Buck: Choosing What to Evaluate for Faster Bayesian Optimization (AutoML Conf 2022)
 In this work, we proposed a decoupled cost-aware acquisition function for Bayesian multi-objective optimization. Instead of evaluating all objective functions, we automatically choose the one that provides the highest benefit, weighted by the cost to perform the evaluation. Our method is especially useful for DNNs used in resource-constrained IoT applications and edge devices. Furthermore, when confronted with a performance bottleneck, this method can be useful in returning the system to a good operating region significantly faster than other baselines. Additionally, our method enriches the existing multi-objective Bayesian optimization (MOBO) literature with a novel decoupled cost-aware technique. 
 
 ## Abstract
@@ -15,7 +15,7 @@ improvement of the hypervolume of the Pareto region by the measurement cost of e
 objective. We perform experiments on a of range of DNN applications for comprehensive
 evaluation of our approach
 
-# How to use Our approacj
+# How to use Our approach
 Our cost aware decoupled Bayesial optimization (CADBO) approach can be used for optimizing perfomance objectives both in offline and online modes. 
 
 - **Offline mode:**  CADBO can be run on any device that uses previously measured designs in offline mode. 
@@ -32,9 +32,10 @@ please resolve the following dependencies:
 * numpy
 * scipy
 * pandas
+* python 3.6.9
 
 
-## Run
+## Run Instructions
 To run our approach in online mode for a particulat DNN model use the following command:
 ```python
 command: python cadbo.py -m online -n dnn-model-name
