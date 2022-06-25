@@ -21,9 +21,11 @@ To run our approach in online mode use the following command:
 ```python
 command: python cadbo.py -m online
 ```
+
 For example, to run optimization with GP in the online mode please use the following command: 
 ```python
 command: python cadbo.py -m online 
+```
 
 To run our approach in the offline mode please use the following command:
 ```python
